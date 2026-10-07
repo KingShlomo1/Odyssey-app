@@ -1,47 +1,31 @@
-import type { AppData } from './types';
+import { AppDataSchema, type AppData } from '../../shared/schema';
 
-export const STORAGE_KEY = 'odyssey-app:data';
+/** Where the earlier offline-only version of the app kept its data. */
+export const LEGACY_STORAGE_KEY = 'odyssey-app:data';
 
-export const emptyData = (): AppData => ({ version: 1, profile: null, sessions: [], courses: [], tasks: [] });
-
-/** Validates and normalizes untrusted JSON (from storage or an imported backup). */
+/** Validates untrusted JSON (an imported backup or legacy local data). */
 export function parseData(raw: unknown): AppData | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const d = raw as Partial<AppData>;
-  if (d.version !== 1) return null;
-  if (!Array.isArray(d.sessions) || !Array.isArray(d.courses) || !Array.isArray(d.tasks)) return null;
-  return {
-    version: 1,
-    profile: d.profile ?? null,
-    sessions: d.sessions,
-    courses: d.courses,
-    tasks: d.tasks,
-  };
+  const result = AppDataSchema.safeParse(raw);
+  return result.success ? (result.data as AppData) : null;
 }
 
-export function loadData(): AppData {
+/** Data saved by the offline version on this device, if any is worth importing. */
+export function legacyData(): AppData | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) return parseData(JSON.parse(raw)) ?? emptyData();
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    const data = raw ? parseData(JSON.parse(raw)) : null;
+    return data && (data.sessions.length || data.courses.length || data.tasks.length) ? data : null;
   } catch {
-    // Storage unavailable or corrupt: start fresh.
-  }
-  return emptyData();
-}
-
-export function saveData(data: AppData): boolean {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    return true;
-  } catch {
-    return false;
+    return null;
   }
 }
 
-export function newId(): string {
-  return typeof crypto !== 'undefined' && 'randomUUID' in crypto
-    ? crypto.randomUUID()
-    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+export function clearLegacyData(): void {
+  try {
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    // ignore
+  }
 }
 
 export function downloadFile(filename: string, content: string, type: string): void {
