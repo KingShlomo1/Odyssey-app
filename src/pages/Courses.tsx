@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { GraduationCap, Plus } from 'lucide-react';
 import { useStore } from '../lib/store';
 import type { Course, CourseStatus, GradeLevel, TrackId } from '../lib/types';
 import { COURSE_STATUSES, GRADE_NAMES, TRACKS } from '../lib/constants';
@@ -7,6 +8,23 @@ import Sheet, { Field } from '../components/Sheet';
 import Empty from '../components/Empty';
 
 type Draft = Omit<Course, 'id' | 'finalGrade'> & { id?: string; finalGrade: string };
+
+const TRACK_COLORS: Record<TrackId, string> = { math: '#6366f1', physics: '#0ea5e9', cs: '#10b981', chem: '#f59e0b', other: '#a855f7' };
+
+/** A ring showing the weighted average out of 100. */
+function AverageRing({ value }: { value: number | null }) {
+  const r = 42;
+  const c = 2 * Math.PI * r;
+  const pct = value == null ? 0 : value / 100;
+  return (
+    <svg viewBox="0 0 100 100" className="ring" role="img" aria-label={value == null ? 'אין ממוצע עדיין' : `ממוצע ${value}`}>
+      <circle cx="50" cy="50" r={r} className="ring-track" />
+      <circle cx="50" cy="50" r={r} className="ring-value" strokeDasharray={`${c * pct} ${c}`} transform="rotate(-90 50 50)" />
+      <text x="50" y="47" className="ring-number">{value ?? '–'}</text>
+      <text x="50" y="64" className="ring-label">ממוצע</text>
+    </svg>
+  );
+}
 
 export default function Courses() {
   const { data, upsertCourse, removeCourse } = useStore();
@@ -23,56 +41,73 @@ export default function Courses() {
     finalGrade: '',
   });
 
-  const edit = (c: Course) => setDraft({ ...c, finalGrade: c.finalGrade?.toString() ?? '' });
-
-  const save = () => {
+  const save = async () => {
     if (!draft) return;
     const grade = draft.finalGrade.trim() === '' ? undefined : Math.min(100, Math.max(0, Number(draft.finalGrade)));
-    upsertCourse({
-      ...draft,
-      name: draft.name.trim(),
-      credits: draft.gradeLevel === 9 ? 0 : Math.max(0, draft.credits),
-      finalGrade: grade,
-    });
+    await upsertCourse({ ...draft, name: draft.name.trim(), credits: draft.gradeLevel === 9 ? 0 : Math.max(0, draft.credits), finalGrade: grade });
     setDraft(null);
   };
 
   const levels = ([12, 11, 10, 9] as GradeLevel[]).filter((g) => data.courses.some((c) => c.gradeLevel === g));
   const trackEntries = Object.entries(summary.byTrack) as [TrackId, number][];
+  const trackTotal = trackEntries.reduce((s, [, n]) => s + n, 0);
 
   return (
-    <div className="stack">
+    <div className="page">
       <header className="page-header row-between">
-        <h1>קורסים ונק״ז</h1>
+        <div>
+          <h1>קורסים ונק״ז</h1>
+          <p className="muted">נקודות הזכות נשמרות לזכותך עד 10 שנים מסיום הקורס.</p>
+        </div>
         <button className="btn primary" onClick={() => setDraft(blank())}>
-          + קורס
+          <Plus size={18} /> קורס
         </button>
       </header>
 
-      <section className="card accent">
-        <div className="stats">
-          <div>
-            <div className="stat">{summary.earned}</div>
-            <div className="small">נק״ז שנצברו</div>
+      <section className="hero-card credits-hero">
+        <div className="stars" aria-hidden />
+        <AverageRing value={summary.average} />
+        <div className="grow">
+          <div className="credit-stats">
+            <div>
+              <div className="stat">{summary.earned}</div>
+              <div className="small">נק״ז שנצברו</div>
+            </div>
+            <div>
+              <div className="stat">{summary.inProgress}</div>
+              <div className="small">בלימודים</div>
+            </div>
+            <div>
+              <div className="stat">{summary.planned}</div>
+              <div className="small">מתוכננות</div>
+            </div>
           </div>
-          <div>
-            <div className="stat">{summary.inProgress}</div>
-            <div className="small">בלימודים</div>
-          </div>
-          <div>
-            <div className="stat">{summary.average ?? '–'}</div>
-            <div className="small">ממוצע משוקלל</div>
-          </div>
+          {trackTotal > 0 && (
+            <>
+              <div className="track-bar" aria-hidden>
+                {trackEntries.map(([t, n]) => (
+                  <span key={t} style={{ flex: n, background: TRACK_COLORS[t] }} />
+                ))}
+              </div>
+              <div className="track-legend small">
+                {trackEntries.map(([t, n]) => (
+                  <span key={t}>
+                    <span className="dot" style={{ background: TRACK_COLORS[t] }} /> {TRACKS[t]} {n}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
         </div>
-        {trackEntries.length > 0 && (
-          <p className="small">
-            {trackEntries.map(([t, n]) => `${TRACKS[t]}: ${n}`).join(' · ')}
-          </p>
-        )}
-        <p className="small">נקודות הזכות נשמרות לזכותך עד 10 שנים מסיום הקורס.</p>
       </section>
 
-      {data.courses.length === 0 && <Empty>הוסיפו את הקורסים שאתם לומדים כדי לעקוב אחרי נקודות הזכות והציונים.</Empty>}
+      {data.courses.length === 0 && (
+        <div className="card">
+          <Empty icon={<GraduationCap size={28} />} title="עוד אין קורסים">
+            הוסיפו את הקורסים שלך כדי לעקוב אחרי נקודות הזכות והציונים.
+          </Empty>
+        </div>
+      )}
 
       {levels.map((g) => (
         <section key={g} className="card">
@@ -83,15 +118,16 @@ export default function Courses() {
               .filter((c) => c.gradeLevel === g)
               .map((c) => (
                 <li key={c.id}>
-                  <button className="list-item clickable" onClick={() => edit(c)}>
+                  <button className="course" onClick={() => setDraft({ ...c, finalGrade: c.finalGrade?.toString() ?? '' })}>
+                    <span className="course-bar" style={{ background: TRACK_COLORS[c.track] }} aria-hidden />
                     <span className="grow">
-                      <span>{c.name}</span>
+                      <span className="course-name">{c.name}</span>
                       <span className="muted small block">
                         {TRACKS[c.track]}
                         {countsForCredit(c) && ` · ${c.credits} נק״ז`}
-                        {c.finalGrade != null && ` · ציון ${c.finalGrade}`}
                       </span>
                     </span>
+                    {c.finalGrade != null && <span className="grade">{c.finalGrade}</span>}
                     <span className={`pill status-${c.status}`}>{COURSE_STATUSES[c.status]}</span>
                   </button>
                 </li>
@@ -105,10 +141,10 @@ export default function Courses() {
           title={draft.id ? 'עריכת קורס' : 'קורס חדש'}
           onClose={() => setDraft(null)}
           onSubmit={save}
-          onDelete={draft.id ? () => { removeCourse(draft.id!); setDraft(null); } : undefined}
+          onDelete={draft.id ? async () => { await removeCourse(draft.id!); setDraft(null); } : undefined}
         >
           <Field label="שם הקורס">
-            <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} required />
+            <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} required maxLength={120} />
           </Field>
           <div className="row">
             <Field label="תחום">
@@ -131,6 +167,7 @@ export default function Courses() {
               <input
                 type="number"
                 min={0}
+                max={20}
                 step={0.5}
                 inputMode="decimal"
                 value={draft.gradeLevel === 9 ? 0 : draft.credits}

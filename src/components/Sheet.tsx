@@ -1,53 +1,80 @@
-import { useEffect, useId, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from 'react';
+import { X } from 'lucide-react';
 
 interface Props {
   title: string;
   onClose(): void;
-  onSubmit(): void;
-  onDelete?(): void;
+  /** When set, the sheet is a form with save (and optional delete) buttons. */
+  onSubmit?(): void | Promise<void>;
+  onDelete?(): void | Promise<void>;
+  submitLabel?: string;
   children: ReactNode;
 }
 
-/** A bottom sheet holding an edit form. */
-export default function Sheet({ title, onClose, onSubmit, onDelete, children }: Props) {
+/** A bottom sheet on phones and a centered dialog on larger screens. */
+export default function Sheet({ title, onClose, onSubmit, onDelete, submitLabel = 'שמירה', children }: Props) {
+  const [busy, setBusy] = useState(false);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.body.style.overflow = overflow;
+    };
   }, [onClose]);
+
+  const guard = async (fn: () => void | Promise<void>) => {
+    setBusy(true);
+    try {
+      await fn();
+    } catch {
+      // The store already showed an error toast; keep the sheet open.
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    onSubmit();
+    if (onSubmit) void guard(onSubmit);
   };
 
+  const Body = onSubmit ? 'form' : 'div';
+
   return (
-    <div className="sheet-backdrop" onClick={onClose}>
-      <form className="sheet" role="dialog" aria-modal="true" aria-label={title} onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+    <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <Body className="sheet" role="dialog" aria-modal="true" aria-label={title} onSubmit={onSubmit ? submit : undefined}>
+        <div className="sheet-grip" aria-hidden />
         <header className="sheet-header">
           <h2>{title}</h2>
           <button type="button" className="icon-btn" onClick={onClose} aria-label="סגירה">
-            ✕
+            <X size={20} />
           </button>
         </header>
         <div className="sheet-body">{children}</div>
-        <footer className="sheet-footer">
-          <button type="submit" className="btn primary">
-            שמירה
-          </button>
-          {onDelete && (
-            <button
-              type="button"
-              className="btn danger"
-              onClick={() => {
-                if (confirm('למחוק?')) onDelete();
-              }}
-            >
-              מחיקה
+        {onSubmit && (
+          <footer className="sheet-footer">
+            <button type="submit" className="btn primary" disabled={busy}>
+              {submitLabel}
             </button>
-          )}
-        </footer>
-      </form>
+            {onDelete && (
+              <button
+                type="button"
+                className="btn ghost danger"
+                disabled={busy}
+                onClick={() => {
+                  if (confirm('למחוק?')) void guard(onDelete);
+                }}
+              >
+                מחיקה
+              </button>
+            )}
+          </footer>
+        )}
+      </Body>
     </div>
   );
 }
